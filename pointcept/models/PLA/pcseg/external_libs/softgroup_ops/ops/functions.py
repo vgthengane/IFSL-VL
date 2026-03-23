@@ -1,7 +1,7 @@
 import torch
 from torch.autograd import Function
 
-import softgroup_ops as ops
+from . import softgroup_ops as ops
 
 
 class GetMaskIoUOnCluster(Function):

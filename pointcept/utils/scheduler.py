@@ -27,7 +27,7 @@ class MultiStepLR(lr_scheduler.MultiStepLR):
             milestones=[rate * total_steps for rate in milestones],
             gamma=gamma,
             last_epoch=last_epoch,
-            verbose=verbose,
+            # verbose=verbose,
         )
 
 

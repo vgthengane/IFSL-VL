@@ -383,6 +383,7 @@ class BackboneLoader(HookBase):
             checkpoint = torch.load(
                 self.trainer.cfg.backbone_weight,
                 map_location=lambda storage, loc: storage.cuda(),
+                weights_only=False,
             )
             self.trainer.logger.info(
                 f"Loading layer weights with keyword: {self.keywords}, "

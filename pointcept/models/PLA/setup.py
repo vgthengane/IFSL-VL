@@ -49,10 +49,25 @@ if __name__ == '__main__':
         author_email='jihanyang13@gmail.com',
         license='Apache License 2.0',
         packages=find_packages(exclude=['tools', 'data', 'output']),
+        include_package_data=True,
+        package_data={
+            "pcseg": [
+                # softgroup
+                "external_libs/softgroup_ops/ops/*.py",
+                "external_libs/softgroup_ops/ops/*.so",
+
+                # pool_by_idx
+                "ops/pool_by_idx/*.py",
+                "ops/pool_by_idx/*.so",
+            ],
+        },
         cmdclass={
             'build_ext': BuildExtension,
         },
         ext_modules=[
+            # --------------------------------
+            # Pool_by_idx (already present)
+            # --------------------------------
             make_cuda_ext(
                 name='pool_by_idx',
                 module='pcseg.ops.pool_by_idx',
@@ -60,6 +75,21 @@ if __name__ == '__main__':
                     'src/avg_pool_by_idx.cpp',
                     'src/avg_pool_by_idx_kernel.cu',
                 ]
+            ),
+            # --------------------------------
+            # SoftGroup (ADD THIS)
+            # --------------------------------
+            CUDAExtension(
+                name='pcseg.external_libs.softgroup_ops.ops.softgroup_ops',
+                sources=[
+                    'pcseg/external_libs/softgroup_ops/ops/src/softgroup_api.cpp',
+                    'pcseg/external_libs/softgroup_ops/ops/src/softgroup_ops.cpp',
+                    'pcseg/external_libs/softgroup_ops/ops/src/cuda.cu',
+                ],
+                extra_compile_args={
+                    'cxx': ['-g'],
+                    'nvcc': ['-O2']
+                },
             ),
         ],
     )

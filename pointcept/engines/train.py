@@ -38,11 +38,11 @@ from pcseg.config import (
     cfg_from_yaml_file,
 )
 from pathlib import Path
-from pointcept.models.PLA.pcseg.models.text_networks import (
+from pcseg.models.text_networks import (
     load_text_embedding_from_encoder,
     load_text_embedding_from_path,
 )
-from pointcept.models.PLA.pcseg.models import (
+from pcseg.models import (
     build_vision_network,
     build_text_network,
 )
