@@ -539,20 +539,21 @@ class GFS_VL_Trainer(Trainer):
                 self.logger.info(
                     ">>>>>>>>>>>>>>>> Start Training >>>>>>>>>>>>>>>>"
                 )
-                for self.epoch in range(self.start_epoch, self.max_epoch):
-                    if comm.get_world_size() > 1:
-                        self.train_loader.sampler.set_epoch(self.epoch)
-                    self.model.train()
-                    self.data_iterator = enumerate(self.train_loader)
-                    self.before_epoch()
-                    for (
-                        self.comm_info["iter"],
-                        self.comm_info["input_dict"],
-                    ) in self.data_iterator:
-                        self.before_step()
-                        self.run_step()
-                        self.after_step()
-                    self.after_epoch()
+                # for self.epoch in range(self.start_epoch, self.max_epoch):
+                #     if comm.get_world_size() > 1:
+                #         self.train_loader.sampler.set_epoch(self.epoch)
+                #     self.model.train()
+                #     self.data_iterator = enumerate(self.train_loader)
+                #     self.before_epoch()
+                #     for (
+                #         self.comm_info["iter"],
+                #         self.comm_info["input_dict"],
+                #     ) in self.data_iterator:
+                #         self.before_step()
+                #         self.run_step()
+                #         self.after_step()
+                #         break
+                #     self.after_epoch()
                 self.after_train()
 
         # If using multiple registration datasets, log the final evaluation metrics

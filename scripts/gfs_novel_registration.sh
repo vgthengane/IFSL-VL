@@ -16,15 +16,32 @@
 # -----------------------------
 # Environment
 # -----------------------------
-export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
+# export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 NUM_GPUS=${SLURM_GPUS_ON_NODE:-${CUDA_VISIBLE_DEVICES:+$(echo "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | wc -l)}}
 NUM_GPUS=${NUM_GPUS:-1}
 
 # -----------------------------
+# Save path logic
+# -----------------------------
+if [ -n "$SLURM_JOB_ID" ]; then
+    RUN_ID="${SLURM_JOB_ID}"
+else
+    RUN_ID=""
+fi
+
+# -----------------------------
 # Run (IMPORTANT)
 # -----------------------------
-aprun python tools/train.py \
-  --config-file configs/scannet/semseg-pt-v3m1-0-gfsregistrain_k5.py \
-  --num-gpus $NUM_GPUS \
-  --options save_path=_experiments/scannet/few_shot_registration
+aprun \
+  --env OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8} \
+  --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  python tools/train.py \
+    --config-file configs/scannet/semseg-pt-v3m1-0-gfsregistrain_k5.py \
+    --num-gpus $NUM_GPUS \
+    --options save_path=_experiments/scannet/${RUN_ID}_gfs_novel_registration_wht_NBMix_training
+
+# /vol/research/Vishal_Thengane/apptainer_images/ifsl-vl/opt/micromamba/bin/python tools/train.py \
+#   --config-file configs/scannet/semseg-pt-v3m1-0-gfsregistrain_k5.py \
+#   --num-gpus $NUM_GPUS \
+#   --options save_path=_experiments/scannet/gfs_novel_registration_DEBUG_WS
