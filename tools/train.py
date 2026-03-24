@@ -4,6 +4,8 @@ Main Training Script
 Author: Zhaochong An (anzhaochong@outlook.com)
 Please cite our work if the code is helpful to you.
 """
+import sys, os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from pointcept.engines.defaults import (
     default_argument_parser,

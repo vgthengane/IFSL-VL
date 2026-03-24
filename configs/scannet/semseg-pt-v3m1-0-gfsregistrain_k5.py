@@ -31,9 +31,9 @@ nb_mix_blks = 3  # number of novel blocks to mix
 
 weight = ""  # trained model weight or checkpoint
 vlm_3d_weight = (
-    "./pretrain_weights/sparseunet32_636.pth"  # 3D VLM pretrained weight
+    "_experiments/pretrained_weights/3d_vlm_weight/sparseunet32_636.pth"  # 3D VLM pretrained weight
 )
-backbone_weight = "./exp/scannet/ptv3_bk/model/model_best.pth"
+backbone_weight = "_experiments/pretrained_weights/backbone_weights/scannet/model_best.pth"
 # model settings
 model = dict(
     type="RegisTrainSegmentor",
@@ -91,7 +91,7 @@ scheduler = dict(
 param_dicts = [dict(keyword="backbone", lr=0.0001)]
 
 # dataset settings
-data_root = "data/ScanNet200"
+data_root = "_datasets/ScanNet200"
 k_shot = 5
 regis_train_list = ["regis1", "regis2", "regis3", "regis4", "regis5"]
 

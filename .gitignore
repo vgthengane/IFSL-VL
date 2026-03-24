@@ -17,3 +17,14 @@ Dockerfile
 venv/
 output
 version.py
+
+*.pth
+_datasets/*
+_experiments/*
+_archive/*
+
+
+*.log
+sync_server.*
+
+libs/flash-attention/*
