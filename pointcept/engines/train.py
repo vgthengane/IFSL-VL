@@ -531,7 +531,7 @@ class GFS_VL_Trainer(Trainer):
             self.cfg.data.train.k_shot = self.cfg.k_shot
             self.cfg.data.train.seed = val_data_cfg["seed"]
             self.cfg.data.train.nb_mix_blks = self.cfg.nb_mix_blks
-            self.train_loader = self.build_train_loader()
+            self.train_loader = self.build_train_loader() #TODO: update this for memory buffer
 
             # Execute the training loop for the current registration dataset
             with EventStorage() as self.storage, ExceptionWriter():

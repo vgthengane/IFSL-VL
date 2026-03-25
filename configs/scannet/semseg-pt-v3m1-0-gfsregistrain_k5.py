@@ -11,8 +11,9 @@ train = dict(type="GFS_VL_Trainer")
 test = dict(type="GFSSemSegTester")
 
 # misc custom setting
-batch_size = 12  # bs: total bs in all gpus
-num_worker = 15  # larger than 15 has timeout errors
+memory_buffer = True
+batch_size = 6  # bs: total bs in all gpus
+num_worker = 8  # larger than 15 has timeout errors
 mix_prob = 0
 empty_cache = False
 enable_amp = True
@@ -152,6 +153,7 @@ data = dict(
             ),
         ],
         test_mode=False,
+        memory_ratio=0.05 if memory_buffer else None, # 5% of the training data to use for memory buffer sampling
     ),
     regis1=dict(
         type="ScanNetDataset_REGIS",

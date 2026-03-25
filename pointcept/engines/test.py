@@ -488,15 +488,15 @@ class GFSSemSegTester(TesterBase):
                         pred[idx_part[bs:be], :] += pred_part[bs:be]
                         bs = be
 
-                logger.info(
-                    "Test: {}/{}-{data_name}, Batch: {batch_idx}/{batch_num}".format(
-                        idx + 1,
-                        len(self.test_loader),
-                        data_name=data_name,
-                        batch_idx=i,
-                        batch_num=len(fragment_list),
-                    )
-                )
+                # logger.info(
+                #     "Test: {}/{}-{data_name}, Batch: {batch_idx}/{batch_num}".format(
+                #         idx + 1,
+                #         len(self.test_loader),
+                #         data_name=data_name,
+                #         batch_idx=i,
+                #         batch_num=len(fragment_list),
+                #     )
+                # )
             pred = pred.max(1)[1].data.cpu().numpy()
             if "origin_segment" in data_dict.keys():
                 assert "inverse" in data_dict.keys()

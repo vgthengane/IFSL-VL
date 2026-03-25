@@ -777,6 +777,7 @@ class ScanNetDataset_REGISTrain(ScanNetDataset_BASETrain):
     """
 
     def __init__(self, nb_mix_blks=3, k_shot=5, seed=10, **kwargs):
+        memory_ratio = kwargs.pop("memory_ratio")
         super().__init__(**kwargs)
         self.nb_mix_blks = nb_mix_blks
         reg_file = os.path.join(
@@ -811,6 +812,21 @@ class ScanNetDataset_REGISTrain(ScanNetDataset_BASETrain):
 
         # Novel classes are the unique novel class IDs in the registration set.
         self.novel_classes = list(self.regis_cls2scans.keys())
+
+        # 🔥 Memory buffer sampling (IFSL-style)
+        memory_ratio = kwargs.get("memory_ratio", 0.05)
+        seed = kwargs.get("seed", 0)
+
+        if memory_ratio is not None and memory_ratio > 0:
+            total_len = len(self.data_list)
+            keep_len = max(1, int(total_len * memory_ratio))
+
+            np.random.seed(seed)
+            selected_indices = np.random.choice(total_len, keep_len, replace=False)
+
+            self.data_list = [self.data_list[i] for i in selected_indices]
+
+            print(f"[ScanNetDataset] Using memory buffer: {keep_len}/{total_len} samples ({memory_ratio*100:.2f}%)")
 
     def _get_instances_from_class(self, class_id):
         """
