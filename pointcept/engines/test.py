@@ -45,7 +45,7 @@ class TesterBase:
         self.verbose = verbose
         if self.verbose:
             self.logger.info(f"Save path: {cfg.save_path}")
-            self.logger.info(f"Config:\n{cfg.pretty_text}")
+            # self.logger.info(f"Config:\n{cfg.pretty_text}")
         if model is None:
             self.logger.info("=> Building model ...")
             self.model = self.build_model()
@@ -53,6 +53,7 @@ class TesterBase:
             self.model = model
         if test_loader is None:
             self.logger.info("=> Building test dataset & dataloader ...")
+            self.cfg.data.test.task_id = self.cfg.task_id
             self.test_loader = self.build_test_loader()
         else:
             self.test_loader = test_loader
@@ -488,15 +489,15 @@ class GFSSemSegTester(TesterBase):
                         pred[idx_part[bs:be], :] += pred_part[bs:be]
                         bs = be
 
-                logger.info(
-                    "Test: {}/{}-{data_name}, Batch: {batch_idx}/{batch_num}".format(
-                        idx + 1,
-                        len(self.test_loader),
-                        data_name=data_name,
-                        batch_idx=i,
-                        batch_num=len(fragment_list),
-                    )
-                )
+                # logger.info(
+                #     "Test: {}/{}-{data_name}, Batch: {batch_idx}/{batch_num}".format(
+                #         idx + 1,
+                #         len(self.test_loader),
+                #         data_name=data_name,
+                #         batch_idx=i,
+                #         batch_num=len(fragment_list),
+                #     )
+                # )
             pred = pred.max(1)[1].data.cpu().numpy()
             if "origin_segment" in data_dict.keys():
                 assert "inverse" in data_dict.keys()

@@ -53,7 +53,7 @@ def force_fp32(apply_to=None, out_fp16=False):
                         new_kwargs[arg_name] = cast_tensor_type(arg_value, torch.half, torch.float)
                     else:
                         new_kwargs[arg_name] = arg_value
-            with torch.cuda.amp.autocast(enabled=False):
+            with torch.amp.autocast("cuda", enabled=False):
                 output = old_func(*new_args, **new_kwargs)
             # cast the results back to fp32 if necessary
             if out_fp16:

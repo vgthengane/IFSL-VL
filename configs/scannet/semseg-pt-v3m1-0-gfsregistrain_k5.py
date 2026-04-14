@@ -1,18 +1,22 @@
 from pointcept.datasets.preprocessing.scannet.meta_data.scannet200_constants import (
-    CLASS20_LABELS_BASE_NOVEL,
+    CLASS20_LABELS_NOVEL,
     CLASS20_LABELS_BASE,
 )
 
 _base_ = ["../_base_/default_runtime.py"]
 
 # Trainer
-train = dict(type="GFS_VL_Trainer")
+train = dict(type="IFS_VL_Trainer")
 # Tester
 test = dict(type="GFSSemSegTester")
 
+task_id = -1
+
 # misc custom setting
-batch_size = 12  # bs: total bs in all gpus
-num_worker = 15  # larger than 15 has timeout errors
+memory_buffer = True
+memory_ratio = 0.005
+batch_size = 6  # bs: total bs in all gpus
+num_worker = 8  # larger than 15 has timeout errors
 mix_prob = 0
 empty_cache = False
 enable_amp = True
@@ -27,7 +31,7 @@ evaluate = False  # not evaluate after each epoch training process
 vis = None  # visualization save path, set to None to disable visualization
 ps_thresh = 0.6  # threshold for Pseudo-label Selection
 ai_thresh = 0.95  # threshold for Adaptive Infilling
-nb_mix_blks = 3  # number of novel blocks to mix
+nb_mix_blks = 1  # number of novel blocks to mix
 
 weight = ""  # trained model weight or checkpoint
 vlm_3d_weight = (
@@ -38,8 +42,7 @@ backbone_weight = "_experiments/pretrained_weights/backbone_weights/scannet/mode
 model = dict(
     type="RegisTrainSegmentor",
     num_base_classes=len(CLASS20_LABELS_BASE),
-    num_novel_classes=len(CLASS20_LABELS_BASE_NOVEL)
-    - len(CLASS20_LABELS_BASE),
+    num_novel_classes=len(CLASS20_LABELS_NOVEL[task_id]),
     backbone_out_channels=64,
     backbone=dict(
         type="PT-v3m1",
@@ -97,9 +100,9 @@ regis_train_list = ["regis1", "regis2", "regis3", "regis4", "regis5"]
 
 data = dict(
     num_bases=len(CLASS20_LABELS_BASE),
-    num_base_novels=len(CLASS20_LABELS_BASE_NOVEL),
+    num_base_novels=len(CLASS20_LABELS_BASE) + len(CLASS20_LABELS_NOVEL[task_id]),
     ignore_index=-1,
-    names=CLASS20_LABELS_BASE_NOVEL,
+    names=list(CLASS20_LABELS_BASE) + list(CLASS20_LABELS_NOVEL[task_id]),
     train=dict(
         type="ScanNetDataset_REGISTrain",
         split="train",
@@ -152,6 +155,7 @@ data = dict(
             ),
         ],
         test_mode=False,
+        memory_ratio=memory_ratio if memory_buffer else None, # 5% of the training data to use for memory buffer sampling
     ),
     regis1=dict(
         type="ScanNetDataset_REGIS",

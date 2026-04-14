@@ -44,7 +44,7 @@ def train_one_epoch(args, model, optimizer, train_loader, lr_scheduler, accumula
 
     end = time.time()
 
-    scaler = torch.cuda.amp.GradScaler(enabled=args.use_amp)
+    scaler = torch.amp.GradScaler('cuda', enabled=args.use_amp)
 
     for cur_it in range(total_it_each_epoch):
         if (cur_it + 1) == len(train_loader):  # manually drop last samples
@@ -92,7 +92,7 @@ def train_one_epoch(args, model, optimizer, train_loader, lr_scheduler, accumula
         #######################
         # forward vision part #
         #######################
-        with torch.cuda.amp.autocast(enabled=args.use_amp):
+        with torch.amp.autocast("cuda", enabled=args.use_amp):
             ret_dict, tb_dict, disp_dict = model(batch)
 
         loss = ret_dict['loss'].mean()
