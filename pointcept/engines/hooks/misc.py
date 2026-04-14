@@ -404,7 +404,21 @@ class BackboneLoader(HookBase):
                 if comm.get_world_size() > 1
                 else self.trainer.model
             )
+            if "vlm_novel_proto" in weight.keys():
+                self.trainer.logger.info(f"Loading vlm_novel_proto from {self.trainer.cfg.backbone_weight}")
+                model.register_buffer("vlm_novel_proto", weight["vlm_novel_proto"])
+                # del weight["vlm_novel_proto"]
 
+            if model.novel_seg_head.weight.shape[0] != weight["novel_seg_head.weight"].shape[0]:
+                self.trainer.logger.info(f"Novel seg head model shape: {model.novel_seg_head.weight.shape}")
+                self.trainer.logger.info(f"Novel seg head weight shape: {weight['novel_seg_head.weight'].shape}")
+                
+                weight["novel_seg_head.weight"] = torch.cat([
+                    weight["novel_seg_head.weight"], 
+                    model.novel_seg_head.weight[weight["novel_seg_head.weight"].shape[0]:]
+                ], dim=0)
+            
+            
             load_state_info = model.load_state_dict(weight, strict=self.strict)
             self.trainer.logger.warning(
                 f"Missing keys in weight: {load_state_info.missing_keys}"

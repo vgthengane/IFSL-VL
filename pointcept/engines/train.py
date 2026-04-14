@@ -145,11 +145,16 @@ class Trainer(TrainerBase):
         self.logger.info("=> Loading config ...")
         self.cfg = cfg
         self.logger.info(f"Save path: {cfg.save_path}")
-        self.logger.info(f"Config:\n{cfg.pretty_text}")
+        # self.logger.info(f"Config:\n{cfg.pretty_text}")
         self.logger.info("=> Building model ...")
         self.model = self.build_model()
         self.logger.info("=> Building writer ...")
         self.writer = self.build_writer()
+
+        # have a regis_dataset initialization to create a .txt files
+        self.logger.info("=> Building regis dataset ...")
+        self.build_regis_dataset()
+
         self.logger.info("=> Building train dataset & dataloader ...")
         self.train_loader = self.build_train_loader()
         self.logger.info("=> Building val dataset & dataloader ...")
@@ -160,6 +165,18 @@ class Trainer(TrainerBase):
         self.scaler = self.build_scaler()
         self.logger.info("=> Building hooks ...")
         self.register_hooks(self.cfg.hooks)
+
+    def build_regis_dataset(self):
+        for self.regis_str in self.cfg.regis_train_list:
+            # Retrieve registration dataset configuration
+            if hasattr(self.cfg.data, self.regis_str):
+                val_data_cfg = getattr(self.cfg.data, self.regis_str)
+            else:
+                raise AttributeError(
+                    f"{self.regis_str} not found in self.cfg.data"
+                )
+            val_data_cfg.task_id = self.task_id
+            build_dataset(val_data_cfg)
 
     def train(self):
         with EventStorage() as self.storage, ExceptionWriter():
@@ -197,7 +214,7 @@ class Trainer(TrainerBase):
         for key in input_dict.keys():
             if isinstance(input_dict[key], torch.Tensor):
                 input_dict[key] = input_dict[key].cuda(non_blocking=True)
-        with torch.cuda.amp.autocast(enabled=self.cfg.enable_amp):
+        with torch.amp.autocast("cuda", enabled=self.cfg.enable_amp):
             output_dict = self.model(input_dict)
             loss = output_dict["loss"]
         self.optimizer.zero_grad()
@@ -253,6 +270,7 @@ class Trainer(TrainerBase):
         return writer
 
     def build_train_loader(self):
+        self.cfg.data.train.task_id = self.task_id
         train_data = build_dataset(self.cfg.data.train)
 
         if comm.get_world_size() > 1:
@@ -324,7 +342,7 @@ class Trainer(TrainerBase):
         return build_scheduler(self.cfg.scheduler, self.optimizer)
 
     def build_scaler(self):
-        scaler = torch.cuda.amp.GradScaler() if self.cfg.enable_amp else None
+        scaler = torch.amp.GradScaler('cuda', ) if self.cfg.enable_amp else None
         return scaler
 
 
@@ -411,9 +429,9 @@ class GFS_VL_Trainer(Trainer):
         """
         Compute novel classes prototypes using the 3D VLM.
         """
-        num_novel = self.cfg.data.num_base_novels - self.cfg.data.num_bases
-        average_features = torch.zeros(num_novel, 512, device="cuda")
-        class_counts = torch.zeros(num_novel, device="cuda")
+        # num_novel = self.cfg.data.num_base_novels - self.cfg.data.num_bases
+        average_features = torch.zeros(self.n_task_classes, 512, device="cuda")
+        class_counts = torch.zeros(self.n_task_classes, device="cuda")
 
         if comm.is_main_process():
             for input_dict in regis_val_loader:
@@ -433,14 +451,15 @@ class GFS_VL_Trainer(Trainer):
                         class_id = class_id.item()
                         if class_id == -1:
                             continue
-                        assert class_id >= self.cfg.data.num_bases
+                        assert class_id >= self.n_known_classes
                         class_mask = input_dict["segment"] == class_id
                         class_features = vlm_feats[class_mask]
-                        idx = class_id - self.cfg.data.num_bases
+                        idx = class_id - self.n_known_classes
                         average_features[idx] += class_features.sum(dim=0)
                         class_counts[idx] += class_features.size(0)
 
             # Verify each novel class has at least one sample
+            # TODO: I geuss need to save prev novel classes prototypes and append them here
             assert torch.all(class_counts > 0)
             # Normalize to get the average feature per class
             average_features = average_features / class_counts.unsqueeze(1)
@@ -513,6 +532,7 @@ class GFS_VL_Trainer(Trainer):
                 raise AttributeError(
                     f"{self.regis_str} not found in self.cfg.data"
                 )
+            val_data_cfg.task_id = self.task_id
             val_data = build_dataset(val_data_cfg)
             regis_val_loader = torch.utils.data.DataLoader(
                 val_data,
@@ -525,17 +545,29 @@ class GFS_VL_Trainer(Trainer):
             )
 
             # Extract 3D VLM feature prototypes on novel classes from current registration set
-            self.vlm_novel_proto = self.extract_3d_vlm_proto(regis_val_loader)
-
+            self.vlm_task_proto = self.extract_3d_vlm_proto(regis_val_loader)
+        
             # Update the training dataset configuration
             self.cfg.data.train.k_shot = self.cfg.k_shot
             self.cfg.data.train.seed = val_data_cfg["seed"]
             self.cfg.data.train.nb_mix_blks = self.cfg.nb_mix_blks
-            self.train_loader = self.build_train_loader() #TODO: update this for memory buffer
+            self.train_loader = self.build_train_loader() #FIXME: update this for memory buffer, this is not ideal, but works for now
 
+            if self.task_id > 0:
+                self.cfg.backbone_weight = os.path.join(
+                    self.cfg.save_path.replace(f"task-{self.task_id:02d}", f"task-{self.task_id-1:02d}"), 
+                    "model", f"{self.regis_str}_model_last.pth"
+                )
+                self.logger.info(f"Backbone weight: {self.cfg.backbone_weight}")
             # Execute the training loop for the current registration dataset
             with EventStorage() as self.storage, ExceptionWriter():
                 self.before_train()
+
+                # reguster prototypes for the task
+                self.register_prototypes()
+                self.vlm_novel_proto = self.model.vlm_novel_proto
+                self.logger.info(f"VLM novel proto: {self.vlm_novel_proto.shape}")
+                    
                 self.logger.info(
                     ">>>>>>>>>>>>>>>> Start Training >>>>>>>>>>>>>>>>"
                 )
@@ -594,7 +626,7 @@ class GFS_VL_Trainer(Trainer):
         # Calibrate target labels based on 3D VLM predictions
         new_target = self.target_calibrate(input_dict)
 
-        with torch.cuda.amp.autocast(enabled=self.cfg.enable_amp):
+        with torch.amp.autocast("cuda", enabled=self.cfg.enable_amp):
             output_dict = self.model(input_dict)
             seg_logits = output_dict.pop("seg_logits")
             criteria = (
@@ -851,3 +883,31 @@ class GFS_VL_Trainer(Trainer):
 
         data_dict["batch_size"] = batch_size
         return data_dict
+
+    def register_prototypes(self):
+        novel_proto = (
+        torch.cat([self.model.vlm_novel_proto, self.vlm_task_proto], dim=0)
+            if hasattr(self.model, "vlm_novel_proto")
+            else self.vlm_task_proto
+        )
+        self.model.register_buffer("vlm_novel_proto", novel_proto.clone())
+
+
+@TRAINERS.register_module("IFS_VL_Trainer")
+class IFS_VL_Trainer(GFS_VL_Trainer):
+    def __init__(self, cfg):
+        cfg = self.set_task(cfg)
+        super(IFS_VL_Trainer, self).__init__(cfg)
+
+    def set_task(self, cfg):
+        # task specific settings
+        self.task_id = cfg.task_id
+        self.n_base_classes = cfg.model.num_base_classes
+        self.n_task_classes = cfg.model.num_novel_classes
+        self.n_novel_classes = cfg.model.pop("num_all_novel_classes")
+        self.n_total_classes = self.n_base_classes + self.n_novel_classes
+        self.n_known_classes = self.n_total_classes - self.n_task_classes
+
+        cfg.model.num_novel_classes = self.n_novel_classes
+
+        return cfg

@@ -22,28 +22,30 @@ NUM_GPUS=${SLURM_GPUS_ON_NODE:-$(nvidia-smi -L | wc -l)}
 # -------------------------------
 # Paths
 # -------------------------------
-HOST=$(hostname)
-WORK_DIR="/mnt/fast/nobackup/scratch4weeks/vt00262/projects/CLIMB3D++"
+# HOST=$(hostname)
+# WORK_DIR="/mnt/fast/nobackup/scratch4weeks/vt00262/projects/CLIMB3D++"
 
 # -------------------------------
 # Experiment Config
 # -------------------------------
 EXP_DIR="_experiments/scannet"
-EXP_NAME="${RUN_ID}_gfs_novel_registration_wit_mbuffer"
+# EXP_NAME="${RUN_ID}_gfs_novel_registration_wit_mbuffer"
+EXP_NAME="DEBUG_gfs_novel_registration_wit_mbuffer"
+
 EXP_PATH=${EXP_DIR}/${EXP_NAME}
-while [ -d "${EXP_PATH}" ]; do
-  RAND_ID=$(tr -dc 'a-z0-9' </dev/urandom | head -c 4)
-  EXP_NAME="${EXP_NAME}_${RAND_ID}"
-  EXP_PATH=${EXP_DIR}/${EXP_NAME}
-done
+# while [ -d "${EXP_PATH}" ]; do
+#   RAND_ID=$(tr -dc 'a-z0-9' </dev/urandom | head -c 4)
+#   EXP_NAME="${EXP_NAME}_${RAND_ID}"
+#   EXP_PATH=${EXP_DIR}/${EXP_NAME}
+# done
 
 # -------------------------------
 # Run
 # -------------------------------
-HOST=$(hostname)
-if [[ "$HOST" != "ulws102.surrey.ac.uk" ]]; then
-    cd "$WORK_DIR"
-fi
+# HOST=$(hostname)
+# if [[ "$HOST" != "ulws102.surrey.ac.uk" ]]; then
+#     cd "$WORK_DIR"
+# fi
 
 aprun \
   --env SLURM_JOB_ID=$RUN_ID \
