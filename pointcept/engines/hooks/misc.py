@@ -409,15 +409,16 @@ class BackboneLoader(HookBase):
                 model.register_buffer("vlm_novel_proto", weight["vlm_novel_proto"])
                 # del weight["vlm_novel_proto"]
 
-            if model.novel_seg_head.weight.shape[0] != weight["novel_seg_head.weight"].shape[0]:
-                self.trainer.logger.info(f"Novel seg head model shape: {model.novel_seg_head.weight.shape}")
-                self.trainer.logger.info(f"Novel seg head weight shape: {weight['novel_seg_head.weight'].shape}")
+            if self.trainer.cfg.task_id > 0:
+                if model.novel_seg_head.weight.shape[0] != weight["novel_seg_head.weight"].shape[0]:
+                    self.trainer.logger.info(f"Novel seg head model shape: {model.novel_seg_head.weight.shape}")
+                    self.trainer.logger.info(f"Novel seg head weight shape: {weight['novel_seg_head.weight'].shape}")
+                    
+                    weight["novel_seg_head.weight"] = torch.cat([
+                        weight["novel_seg_head.weight"], 
+                        model.novel_seg_head.weight[weight["novel_seg_head.weight"].shape[0]:]
+                    ], dim=0)
                 
-                weight["novel_seg_head.weight"] = torch.cat([
-                    weight["novel_seg_head.weight"], 
-                    model.novel_seg_head.weight[weight["novel_seg_head.weight"].shape[0]:]
-                ], dim=0)
-            
             
             load_state_info = model.load_state_dict(weight, strict=self.strict)
             self.trainer.logger.warning(

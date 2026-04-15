@@ -56,7 +56,7 @@ def main():
     # NOTE: Since the novel has seprate list the base task is not considered here.
     # Will start form task 0 to task N (In practice base should be 0 and then novel 1 to N-1)
     # if task_id != -1:
-    start_task_id = 1
+    start_task_id = 0
     num_tasks = len(CLASS20_LABELS_NOVEL)
     for task_id in range(start_task_id, num_tasks):
 

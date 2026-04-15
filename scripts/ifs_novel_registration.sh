@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=gfs-mbuffer
+#SBATCH --job-name=ifs-mbuffer
 #SBATCH --partition=3090_risk
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -29,7 +29,7 @@ cd $WORK_DIR
 # Experiment Config
 # -------------------------------
 EXP_DIR="_experiments/scannet"
-EXP_NAME="${RUN_ID}_gfs_novel_regs_wit_mbuffer"
+EXP_NAME="${RUN_ID}_ifs_novel_regs_wit_mbuffer"
 EXP_PATH=${EXP_DIR}/${EXP_NAME}
 
 # -------------------------------

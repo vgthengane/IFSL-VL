@@ -451,6 +451,7 @@ class GFS_VL_Trainer(Trainer):
                         class_id = class_id.item()
                         if class_id == -1:
                             continue
+                        # class_id should be greater than or equal to n_known_classes
                         assert class_id >= self.n_known_classes
                         class_mask = input_dict["segment"] == class_id
                         class_features = vlm_feats[class_mask]
