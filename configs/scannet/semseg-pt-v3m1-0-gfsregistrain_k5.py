@@ -83,8 +83,8 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 20
-eval_epoch = 20
+epoch = 20 # DEBUG
+eval_epoch = 20 # DEBUG
 optimizer = dict(type="Adam", lr=0.001)
 scheduler = dict(
     type="MultiStepLR",
@@ -96,7 +96,7 @@ param_dicts = [dict(keyword="backbone", lr=0.0001)]
 # dataset settings
 data_root = "_datasets/ScanNet200"
 k_shot = 5
-regis_train_list = ["regis1", "regis2", "regis3", "regis4", "regis5"]
+regis_train_list = ["regis1", "regis2", "regis3", "regis4", "regis5"] # DEBUG
 
 data = dict(
     num_bases=len(CLASS20_LABELS_BASE),

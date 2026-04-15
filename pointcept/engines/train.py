@@ -564,9 +564,10 @@ class GFS_VL_Trainer(Trainer):
             with EventStorage() as self.storage, ExceptionWriter():
                 self.before_train()
 
-                # reguster prototypes for the task
-                self.register_prototypes()
-                self.vlm_novel_proto = self.model.vlm_novel_proto
+                # `self.vlm_task_proto` is already synced in `extract_3d_vlm_proto`,
+                # so each rank can build/register the same novel prototype locally.
+                local_proto = self.register_prototypes()
+                self.vlm_novel_proto = self._sync_vlm_novel_proto(local_proto).detach()
                 self.logger.info(f"VLM novel proto: {self.vlm_novel_proto.shape}")
                     
                 self.logger.info(
@@ -588,6 +589,13 @@ class GFS_VL_Trainer(Trainer):
                     self.after_epoch()
                 self.after_train()
 
+            self.logger.info("Cleaning up vlm_novel_proto")
+            # DDP-safe cleanup of prototype buffer
+            model_ref = self.model.module if comm.get_world_size() > 1 else self.model
+            if hasattr(model_ref, "vlm_novel_proto"):
+                delattr(model_ref, "vlm_novel_proto")
+            torch.cuda.empty_cache()
+        
         # If using multiple registration datasets, log the final evaluation metrics
         if comm.is_main_process() and len(self.cfg.regis_train_list) > 1:
             class_names = (
@@ -886,12 +894,25 @@ class GFS_VL_Trainer(Trainer):
         return data_dict
 
     def register_prototypes(self):
-        novel_proto = (
-        torch.cat([self.model.vlm_novel_proto, self.vlm_task_proto], dim=0)
-            if hasattr(self.model, "vlm_novel_proto")
-            else self.vlm_task_proto
-        )
-        self.model.register_buffer("vlm_novel_proto", novel_proto.clone())
+        model_ref = self.model.module if comm.get_world_size() > 1 else self.model
+
+        if hasattr(model_ref, "vlm_novel_proto"):
+            novel_proto = torch.cat(
+                [model_ref.vlm_novel_proto, self.vlm_task_proto], dim=0
+            )
+        else:
+            novel_proto = self.vlm_task_proto
+        return novel_proto.clone().detach().contiguous()
+
+    def _sync_vlm_novel_proto(self, local_proto=None):
+        assert local_proto is not None
+        model_ref = self.model.module if comm.get_world_size() > 1 else self.model
+        proto = local_proto
+        proto = proto.detach().contiguous()
+        if hasattr(model_ref, "vlm_novel_proto"):
+            delattr(model_ref, "vlm_novel_proto")
+        model_ref.register_buffer("vlm_novel_proto", proto)
+        return proto
 
 
 @TRAINERS.register_module("IFS_VL_Trainer")
