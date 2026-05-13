@@ -542,6 +542,26 @@ CLASS_LABELS_BASE = (
     "wall",
 )
 
+# Map ScanNet-20 (NYU40-style) names to ScanNet200 taxonomy for zero-shot / split labels.
+SCANNET20_TO_SC200_LABEL = {
+    "sofa": "couch",
+    "otherfurniture": "furniture",
+}
+
+# ScanNet-20 classes expressed in ScanNet200 label strings (order follows CLASS_LABELS_20).
+CLASS_LABELS_SC20_IN_SC200_ORDER = tuple(
+    SCANNET20_TO_SC200_LABEL.get(n, n) for n in CLASS_LABELS_20
+)
+
+_BASE_SC20_AS_SC200 = frozenset(CLASS_LABELS_SC20_IN_SC200_ORDER)
+assert len(CLASS_LABELS_SC20_IN_SC200_ORDER) == 20
+
+# All ScanNet200 classes not in ScanNet-20 (180); used where full tail is needed.
+CLASS_LABELS_SC200_REMAINING_NOVEL = tuple(
+    n for n in CLASS_LABELS_200 if n not in _BASE_SC20_AS_SC200
+)
+assert len(CLASS_LABELS_SC200_REMAINING_NOVEL) == 180
+
 CLASS_LABELS_BASE_NOVEL = [
     "floor",
     "wall",
@@ -601,6 +621,12 @@ CLASS_LABELS_BASE_NOVEL = [
     "paper towel dispenser",
     "file cabinet",
 ]
+
+# Zero-shot eval (head / non-long-tail): novel = CLASS_LABELS_BASE_NOVEL minus ScanNet-20
+# (SC200 names), preserving BASE_NOVEL list order.
+CLASS_LABELS_SC20_BN_COMPLEMENT_NOVEL = tuple(
+    n for n in CLASS_LABELS_BASE_NOVEL if n not in _BASE_SC20_AS_SC200
+)
 
 SCANNET_COLOR_MAP_200 = {
     0: (0.0, 0.0, 0.0),

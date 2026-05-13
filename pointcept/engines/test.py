@@ -5,14 +5,24 @@ Author: Zhaochong An (anzhaochong@outlook.com)
 Please cite our work if the code is helpful to you.
 """
 
+import csv
 import os
 import time
 import numpy as np
 from collections import OrderedDict
+from pathlib import Path
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
+
+from pcseg.config import cfg as pcseg_cfg, cfg_from_list, cfg_from_yaml_file
+from pcseg.models import build_text_network, build_vision_network
+from pcseg.models.text_networks import (
+    load_text_embedding_from_encoder,
+    load_text_embedding_from_path,
+)
 
 from .defaults import create_ddp_model
 import pointcept.utils.comm as comm
@@ -29,6 +39,26 @@ from pointcept.utils.misc import (
 
 
 TESTERS = Registry("testers")
+
+
+def _fmt_metric(x):
+    if not np.isfinite(x):
+        return "   nan  "
+    return f"{x:8.4f}"
+
+
+def _vlm_per_class_table_lines(title, idxs, names, iou_class, acc_class, target):
+    wn = max(20, min(42, max((len(n) for n in names), default=8) + 2))
+    lines = [title, ""]
+    hdr = f"{'idx':>4}  {'class':<{wn}}  {'IoU':>8}  {'Acc':>8}  {'GT pts':>10}"
+    lines.append(hdr)
+    lines.append("-" * len(hdr))
+    for i, name in zip(idxs, names):
+        lines.append(
+            f"{i:>4}  {name[:wn]:<{wn}}  {_fmt_metric(iou_class[i])}  "
+            f"{_fmt_metric(acc_class[i])}  {int(target[i]):>10d}"
+        )
+    return lines
 
 
 class TesterBase:
@@ -637,6 +667,386 @@ class GFSSemSegTester(TesterBase):
     @staticmethod
     def collate_fn(batch):
         return batch
+
+
+@TESTERS.register_module()
+class VLM3DZeroShotGFSTester(GFSSemSegTester):
+    """
+    Full-dataset semantic evaluation using only the frozen 3D VLM (no trained
+    segmentation checkpoint). Aggregates fragment logits via one-hot sums, same
+    spirit as softmax accumulation in GFSSemSegTester.
+    """
+
+    def __init__(
+        self,
+        cfg,
+        model=None,
+        test_loader=None,
+        verbose=False,
+    ) -> None:
+        if model is None:
+            model = nn.Module()
+        super().__init__(cfg, model=model, test_loader=test_loader, verbose=verbose)
+        self._build_vlm_3d()
+
+    def _build_vlm_3d(self):
+        cfg_file = (
+            "./pointcept/models/PLA/tools/cfgs/scannet200_models/zs/"
+            "spconv_clip_caption_openscene.yaml"
+        )
+        cfg_from_yaml_file(cfg_file, pcseg_cfg)
+        class_names = list(self.cfg.data.names)
+        pcseg_cfg.CLASS_NAMES = class_names
+        pcseg_cfg.TAG = Path(cfg_file).stem
+        pcseg_cfg.EXP_GROUP_PATH = "/".join(cfg_file.split("/")[1:-1])
+        cfg_from_list(["TEXT_ENCODER.EXTRACT_EMBED", True], pcseg_cfg)
+
+        logger = self.logger
+        if pcseg_cfg.get("TEXT_ENCODER", None) or pcseg_cfg.MODEL.TASK_HEAD.get(
+            "TEXT_EMBED", None
+        ):
+            text_encoder = build_text_network(pcseg_cfg.TEXT_ENCODER).cuda()
+            if (
+                pcseg_cfg.get("TEXT_ENCODER", None)
+                and pcseg_cfg.TEXT_ENCODER.EXTRACT_EMBED
+            ):
+                text_embed = load_text_embedding_from_encoder(
+                    pcseg_cfg.TEXT_ENCODER, text_encoder, logger
+                )
+            else:
+                text_embed = load_text_embedding_from_path(
+                    pcseg_cfg.MODEL.TASK_HEAD.TEXT_EMBED, logger
+                )
+            pcseg_cfg.MODEL.TASK_HEAD.TEXT_EMBED.CHANNEL = text_embed.shape[1]
+            pcseg_cfg.MODEL.TASK_HEAD.TEXT_EMBED.NUM_CLASS = text_embed.shape[0]
+            if pcseg_cfg.MODEL.get("ADAPTER", False):
+                pcseg_cfg.MODEL.ADAPTER.TEXT_DIM = text_embed.shape[1]
+        else:
+            text_embed = None
+
+        self.VLM_3D = build_vision_network(
+            model_cfg=pcseg_cfg.MODEL,
+            num_class=pcseg_cfg.CLASS_NAMES,
+            dataset=pcseg_cfg.DATA_CONFIG,
+        )
+        self.VLM_3D.load_params_from_file(
+            filename=self.cfg.vlm_3d_weight,
+            logger=logger,
+            epoch_id=None,
+            to_cpu=False,
+        )
+        if text_embed is not None:
+            self.VLM_3D.task_head.set_cls_head_with_text_embed(text_embed)
+
+        self.VLM_3D.cuda()
+        self.VLM_3D.eval()
+        for param in self.VLM_3D.parameters():
+            param.requires_grad = False
+        self.VLM_3D_cfg = pcseg_cfg
+
+    def _construct_3d_vlm_input(self, input_dict):
+        xyz = input_dict["coord"]
+        rgb = input_dict["color"]
+        if not self.VLM_3D_cfg.DATA_CONFIG.DATA_PROCESSOR.rgb_norm:
+            rgb = (rgb + 1) * 127.5
+
+        data_dict = {
+            "points_xyz": xyz,
+            "rgb": rgb,
+            "pc_count": xyz.shape[0],
+        }
+        xyz_voxel_scale = (
+            xyz * self.VLM_3D_cfg.DATA_CONFIG.DATA_PROCESSOR.voxel_scale
+        )
+        xyz_voxel_scale = xyz_voxel_scale - xyz_voxel_scale.min(0).values
+        data_dict["points_xyz_voxel_scale"] = xyz_voxel_scale
+
+        if self.VLM_3D_cfg.DATA_CONFIG.DATA_PROCESSOR.rgb_as_feat:
+            data_dict["feats"] = data_dict["rgb"]
+
+        if self.VLM_3D_cfg.DATA_CONFIG.DATA_PROCESSOR.xyz_as_feat:
+            if "feats" in data_dict:
+                data_dict["feats"] = torch.cat(
+                    (data_dict["feats"], data_dict["points_xyz"]), dim=1
+                )
+            else:
+                data_dict["feats"] = data_dict["points_xyz"]
+
+        result = []
+        start = 0
+        for i, end in enumerate(input_dict["offset"]):
+            slice_xyz = data_dict["points_xyz_voxel_scale"][start:end]
+            indexed_points = torch.cat(
+                [
+                    torch.full(
+                        (slice_xyz.shape[0], 1),
+                        i,
+                        dtype=torch.int64,
+                        device=slice_xyz.device,
+                    ),
+                    slice_xyz.to(torch.int64),
+                ],
+                dim=-1,
+            )
+            result.append(indexed_points)
+            start = end
+
+        data_dict["points_xyz_voxel_scale"] = torch.cat(result, dim=0)
+        data_dict["spatial_shape"] = torch.clamp(
+            (data_dict["points_xyz_voxel_scale"].max(0).values[1:] + 1),
+            min=self.VLM_3D_cfg.DATA_CONFIG.MIN_SPATIAL_SCALE,
+        )
+        data_dict["batch_idxs"] = data_dict["points_xyz_voxel_scale"][:, 0].to(
+            torch.int32
+        )
+
+        batch_size = len(input_dict["offset"])
+        if batch_size == 1:
+            data_dict["offsets"] = torch.tensor(
+                [0, data_dict["batch_idxs"].shape[0]], dtype=torch.int32
+            )
+        else:
+            data_dict["offsets"] = torch.cumsum(
+                torch.bincount(data_dict["batch_idxs"] + 1).to(torch.int32),
+                dim=0,
+            )
+            assert len(data_dict["offsets"]) == batch_size + 1
+
+        data_dict["batch_size"] = batch_size
+        return data_dict
+
+    def one_regis_test(self, **kwargs):
+        assert self.test_loader.batch_size == 1
+        logger = get_root_logger()
+        logger.info(
+            ">>>>>>>>>>>>>>>> Start 3D VLM zero-shot (no seg checkpoint) >>>>>>>>>>>>>>>>"
+        )
+
+        batch_time = AverageMeter()
+        intersection_meter = AverageMeter()
+        union_meter = AverageMeter()
+        target_meter = AverageMeter()
+        self.VLM_3D.eval()
+
+        save_path = os.path.join(self.cfg.save_path, "result")
+        make_dirs(save_path)
+        comm.synchronize()
+        record = {}
+        K = self.cfg.data.num_base_novels
+
+        for idx, data_dict in enumerate(self.test_loader):
+            end = time.time()
+            data_dict = data_dict[0]
+            fragment_list = data_dict.pop("fragment_list")
+            segment = data_dict.pop("segment")
+            data_name = data_dict.pop("name")
+
+            pred = torch.zeros((segment.size, K)).cuda()
+
+            for i in range(len(fragment_list)):
+                fragment_batch_size = 1
+                s_i, e_i = i * fragment_batch_size, min(
+                    (i + 1) * fragment_batch_size, len(fragment_list)
+                )
+                input_dict = collate_fn(fragment_list[s_i:e_i])
+                for key in input_dict.keys():
+                    if isinstance(input_dict[key], torch.Tensor):
+                        input_dict[key] = input_dict[key].cuda(
+                            non_blocking=True
+                        )
+                idx_part = input_dict["index"]
+                with torch.no_grad():
+                    data_vlm = self._construct_3d_vlm_input(input_dict)
+                    ret_dict = self.VLM_3D(data_vlm)
+                    seg = ret_dict["seg_preds"].long().view(-1).clamp(0, K - 1)
+                    pred_part = F.one_hot(seg, num_classes=K).float()
+
+                    if self.cfg.empty_cache:
+                        torch.cuda.empty_cache()
+                    bs = 0
+                    for be in input_dict["offset"]:
+                        pred[idx_part[bs:be], :] += pred_part[bs:be]
+                        bs = be
+
+            pred = pred.max(1)[1].data.cpu().numpy()
+            if "origin_segment" in data_dict.keys():
+                assert "inverse" in data_dict.keys()
+                pred = pred[data_dict["inverse"]]
+                segment = data_dict["origin_segment"]
+
+            intersection, union, target = intersection_and_union(
+                pred,
+                segment,
+                K,
+                self.cfg.data.ignore_index,
+            )
+
+            intersection_meter.update(intersection)
+            union_meter.update(union)
+            target_meter.update(target)
+            record[data_name] = dict(
+                intersection=intersection, union=union, target=target
+            )
+
+            mask = union != 0
+            iou_class = intersection / (union + 1e-10)
+            iou = np.mean(iou_class[mask])
+            acc = sum(intersection) / (sum(target) + 1e-10)
+
+            m_iou = np.mean(intersection_meter.sum / (union_meter.sum + 1e-10))
+            m_acc = np.mean(
+                intersection_meter.sum / (target_meter.sum + 1e-10)
+            )
+
+            batch_time.update(time.time() - end)
+            logger.info(
+                "Test: {} [{}/{}]-{} "
+                "Batch {batch_time.val:.3f} ({batch_time.avg:.3f}) "
+                "Accuracy {acc:.4f} ({m_acc:.4f}) "
+                "mIoU {iou:.4f} ({m_iou:.4f})".format(
+                    data_name,
+                    idx + 1,
+                    len(self.test_loader),
+                    segment.size,
+                    batch_time=batch_time,
+                    acc=acc,
+                    m_acc=m_acc,
+                    iou=iou,
+                    m_iou=m_iou,
+                )
+            )
+
+        logger.info("Syncing ...")
+        comm.synchronize()
+        record_sync = comm.gather(record, dst=0)
+
+        if comm.is_main_process():
+            record = {}
+            for _ in range(len(record_sync)):
+                r = record_sync.pop()
+                record.update(r)
+                del r
+            intersection = np.sum(
+                [meters["intersection"] for _, meters in record.items()],
+                axis=0,
+            )
+            union = np.sum(
+                [meters["union"] for _, meters in record.items()], axis=0
+            )
+            target = np.sum(
+                [meters["target"] for _, meters in record.items()], axis=0,
+            )
+
+            iou_class = intersection / (union + 1e-10)
+            accuracy_class = intersection / (target + 1e-10)
+            mIoU = np.mean(iou_class)
+            mAcc = np.mean(accuracy_class)
+            allAcc = sum(intersection) / (sum(target) + 1e-10)
+
+            base_iou_list = iou_class[: self.cfg.data.num_bases]
+            novel_iou_list = iou_class[self.cfg.data.num_bases :]
+            base_acc_list = accuracy_class[: self.cfg.data.num_bases]
+            novel_acc_list = accuracy_class[self.cfg.data.num_bases :]
+
+            class_names = (
+                self.test_loader.dataset.base_class_names
+                + self.test_loader.dataset.novel_class_names
+            )
+
+            base_iou = np.mean(base_iou_list)
+            novel_iou = np.mean(novel_iou_list)
+            base_mAcc = np.mean(base_acc_list)
+            novel_mAcc = np.mean(novel_acc_list)
+            hm_iou = 2 * base_iou * novel_iou / (base_iou + novel_iou + 1e-10)
+
+            novel_target_pts = np.sum(target[self.cfg.data.num_bases :])
+            novel_correct_pts = np.sum(
+                intersection[self.cfg.data.num_bases :]
+            )
+            novel_point_acc = novel_correct_pts / (novel_target_pts + 1e-10)
+
+            logger.info(
+                "VLM zero-shot — mIoU/Base/Novel/HM | "
+                "mAcc/Base/Novel | allAcc | novel-point-acc: "
+                "{:.4f}/{:.4f}/{:.4f}/{:.4f} | {:.4f}/{:.4f}/{:.4f} | {:.4f} | {:.4f}".format(
+                    mIoU,
+                    base_iou,
+                    novel_iou,
+                    hm_iou,
+                    mAcc,
+                    base_mAcc,
+                    novel_mAcc,
+                    allAcc,
+                    novel_point_acc,
+                )
+            )
+            logger.info(
+                "Novel-class summary (mean over novel *classes*): "
+                "mIoU_novel={:.4f}, mAcc_novel={:.4f}; "
+                "micro accuracy on GT novel pixels only: {:.4f}".format(
+                    novel_iou, novel_mAcc, novel_point_acc
+                )
+            )
+
+            nb = self.cfg.data.num_bases
+            base_idxs = list(range(nb))
+            novel_idxs = list(range(nb, len(class_names)))
+            base_lines = _vlm_per_class_table_lines(
+                "BASE (ScanNet-20 in ScanNet200 vocabulary)",
+                base_idxs,
+                class_names[:nb],
+                iou_class,
+                accuracy_class,
+                target,
+            )
+            novel_lines = _vlm_per_class_table_lines(
+                "NOVEL (CLASS_LABELS_BASE_NOVEL minus ScanNet-20 base)",
+                novel_idxs,
+                class_names[nb:],
+                iou_class,
+                accuracy_class,
+                target,
+            )
+            logger.info("\n%s\n\n%s", "\n".join(base_lines), "\n".join(novel_lines))
+
+            csv_path = os.path.join(
+                self.cfg.save_path, "vlm_zero_shot_class_metrics.csv"
+            )
+            with open(csv_path, "w", newline="", encoding="utf-8") as fp:
+                w = csv.writer(fp)
+                w.writerow(
+                    ["split", "index", "class_name", "iou", "accuracy", "gt_points"]
+                )
+                for i in range(nb):
+                    w.writerow(
+                        [
+                            "base",
+                            i,
+                            class_names[i],
+                            float(iou_class[i]),
+                            float(accuracy_class[i]),
+                            int(target[i]),
+                        ]
+                    )
+                for i in range(nb, len(class_names)):
+                    w.writerow(
+                        [
+                            "novel",
+                            i,
+                            class_names[i],
+                            float(iou_class[i]),
+                            float(accuracy_class[i]),
+                            int(target[i]),
+                        ]
+                    )
+            logger.info("Per-class metrics CSV: %s", csv_path)
+
+            logger.info("<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<")
+            result = (mIoU, base_iou, novel_iou, hm_iou, iou_class)
+        else:
+            result = None
+
+        return result
 
 
 @TESTERS.register_module()

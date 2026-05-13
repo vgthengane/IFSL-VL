@@ -22,6 +22,8 @@ from .preprocessing.scannet.meta_data.scannet200_constants import (
     CLASS_LABELS_BASE,
     CLASS_LABELS_BASE_NOVEL,
     CLASS_LABELS_20,  # scannetv2
+    CLASS_LABELS_SC20_IN_SC200_ORDER,
+    CLASS_LABELS_SC20_BN_COMPLEMENT_NOVEL,
     CLASS20_LABELS_BASE,
     CLASS20_LABELS_NOVEL,
 )
@@ -457,6 +459,34 @@ class ScanNet200Dataset_TEST(ScanNet200Dataset_GFS):
             )
         }
         # Build a lookup array to convert original 200 labels to the GFS label indices
+        self.lookup_array = np.full(
+            len(CLASS_LABELS_200), self.bg_label, dtype=np.int32
+        )
+        for idx, label in enumerate(CLASS_LABELS_200):
+            if label in class_to_idx_map:
+                self.lookup_array[idx] = class_to_idx_map[label]
+
+
+@DATASETS.register_module()
+class ScanNet200Dataset_TEST_ScanNet20Base(ScanNet200Dataset_GFS):
+    """
+    ScanNet200 test split with ScanNet-20 (NYU40-style) classes as base and
+    novel classes from ``CLASS_LABELS_BASE_NOVEL`` that are not in that base
+    (``CLASS_LABELS_SC20_BN_COMPLEMENT_NOVEL``). Other ScanNet200 classes are
+    mapped to ignore for evaluation.
+    """
+
+    def __init__(self, **kwargs):
+        kwargs.pop("task_id", None)
+        super().__init__(**kwargs)
+        self.base_class_names = list(CLASS_LABELS_SC20_IN_SC200_ORDER)
+        self.novel_class_names = list(CLASS_LABELS_SC20_BN_COMPLEMENT_NOVEL)
+        class_to_idx_map = {
+            name: idx
+            for idx, name in enumerate(
+                self.base_class_names + self.novel_class_names
+            )
+        }
         self.lookup_array = np.full(
             len(CLASS_LABELS_200), self.bg_label, dtype=np.int32
         )

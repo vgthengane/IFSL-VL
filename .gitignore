@@ -25,8 +25,7 @@ _archive/*
 
 
 *.log
-sync_server.*
+sync_*
 
 libs/flash-attention/
-NOTES.md
-TODO
+WORKLOG.md
