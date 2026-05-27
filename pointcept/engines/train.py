@@ -354,6 +354,12 @@ class GFS_VL_Trainer(Trainer):
 
     def __init__(self, cfg):
         """Initialize the trainer and build the 3D VLM."""
+        self.task_id = max(getattr(cfg, "task_id", 0), 0)
+        self.n_base_classes = cfg.model.num_base_classes
+        self.n_task_classes = cfg.model.num_novel_classes
+        self.n_novel_classes = cfg.model.num_novel_classes
+        self.n_total_classes = self.n_base_classes + self.n_novel_classes
+        self.n_known_classes = self.n_base_classes
         super().__init__(cfg)
         self.build_zero_shot_model()
 
@@ -361,6 +367,7 @@ class GFS_VL_Trainer(Trainer):
         """
         Build the 3D VLM model used for pseudo-label generation.
         """
+        # FIXME: This is wrong as it only uses the openscene config for the 3D VLM model
         cfg_file = "./pointcept/models/PLA/tools/cfgs/scannet200_models/zs/spconv_clip_caption_openscene.yaml"
         self.VLM_3D_cfg = cfg_from_yaml_file(cfg_file, cfg)
 
@@ -917,19 +924,12 @@ class GFS_VL_Trainer(Trainer):
 
 @TRAINERS.register_module("IFS_VL_Trainer")
 class IFS_VL_Trainer(GFS_VL_Trainer):
+    """Incremental few-shot trainer."""
+
     def __init__(self, cfg):
-        cfg = self.set_task(cfg)
-        super(IFS_VL_Trainer, self).__init__(cfg)
-
-    def set_task(self, cfg):
-        # task specific settings
-        self.task_id = cfg.task_id
-        self.n_base_classes = cfg.model.num_base_classes
-        self.n_task_classes = cfg.model.num_novel_classes
-        self.n_novel_classes = cfg.model.pop("num_all_novel_classes")
-        self.n_total_classes = self.n_base_classes + self.n_novel_classes
-        self.n_known_classes = self.n_total_classes - self.n_task_classes
-
-        cfg.model.num_novel_classes = self.n_novel_classes
-
-        return cfg
+        n_task_novel = cfg.model.num_novel_classes
+        n_all_novel = cfg.model.pop("num_all_novel_classes")
+        cfg.model.num_novel_classes = n_all_novel
+        super().__init__(cfg)
+        self.n_task_classes = n_task_novel
+        self.n_known_classes = self.n_total_classes - n_task_novel

@@ -77,6 +77,11 @@ CLASS20_LABELS_NOVEL = [
     ["bathtub", "shower curtain"],
     ["picture", "counter"],
 ]
+CLASS20_LABELS_NOVEL_FLAT = [
+    c for task_cls in CLASS20_LABELS_NOVEL for c in task_cls
+]
+
+CLASS20_LABELS_BASE_NOVEL = list(CLASS20_LABELS_BASE) + CLASS20_LABELS_NOVEL_FLAT
 
 SCANNET_COLOR_MAP_20 = {
     0: (0.0, 0.0, 0.0),

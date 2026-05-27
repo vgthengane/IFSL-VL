@@ -1,21 +1,20 @@
 from pointcept.datasets.preprocessing.scannet.meta_data.scannet200_constants import (
     CLASS20_LABELS_BASE_NOVEL,
     CLASS20_LABELS_BASE,
-    CLASS20_LABELS_NOVEL_FLAT,
+    CLASS20_LABELS_NOVEL,
 )
 
 _base_ = ["../_base_/default_runtime.py"]
 
 # Trainer
-train = dict(type="GFS_VL_Trainer")
+train = dict(type="IFS_VL_Trainer")
 # Tester
 test = dict(type="GFSSemSegTester")
 
-# GFS: single run, all base + novel classes (see tools/train.py).
-task_id = 0
-incremental = False
+task_id = -1  # -1 = run all incremental tasks; 0..N-1 = one task only
+incremental = True
 
-# This setting is used for memory buffer and memory ratio.
+# misc custom setting
 memory_buffer = True
 memory_ratio = 0.05
 batch_size = 12  # bs: total bs in all gpus
@@ -34,7 +33,7 @@ evaluate = False  # not evaluate after each epoch training process
 vis = None  # visualization save path, set to None to disable visualization
 ps_thresh = 0.6  # threshold for Pseudo-label Selection
 ai_thresh = 0.95  # threshold for Adaptive Infilling
-nb_mix_blks = 3  # number of novel blocks to mix
+nb_mix_blks = 1  # number of novel blocks to mix
 
 weight = ""  # trained model weight or checkpoint
 vlm_3d_weight = (
@@ -45,7 +44,7 @@ backbone_weight = "_experiments/pretrained_weights/backbone_weights/scannet/mode
 model = dict(
     type="RegisTrainSegmentor",
     num_base_classes=len(CLASS20_LABELS_BASE),
-    num_novel_classes=len(CLASS20_LABELS_NOVEL_FLAT),
+    num_novel_classes=len(CLASS20_LABELS_NOVEL[task_id]),
     backbone_out_channels=64,
     backbone=dict(
         type="PT-v3m1",
@@ -86,8 +85,8 @@ model = dict(
 )
 
 # scheduler settings
-epoch = 20
-eval_epoch = 20
+epoch = 20 # DEBUG
+eval_epoch = 20 # DEBUG
 optimizer = dict(type="Adam", lr=0.001)
 scheduler = dict(
     type="MultiStepLR",
@@ -99,13 +98,13 @@ param_dicts = [dict(keyword="backbone", lr=0.0001)]
 # dataset settings
 data_root = "_datasets/ScanNet200"
 k_shot = 5
-regis_train_list = ["regis1", "regis2", "regis3", "regis4", "regis5"]
+regis_train_list = ["regis1", "regis2", "regis3", "regis4", "regis5"] # DEBUG
 
 data = dict(
     num_bases=len(CLASS20_LABELS_BASE),
-    num_base_novels=len(CLASS20_LABELS_BASE_NOVEL),
+    num_base_novels=len(CLASS20_LABELS_BASE) + len(CLASS20_LABELS_NOVEL[task_id]),
     ignore_index=-1,
-    names=CLASS20_LABELS_BASE_NOVEL,
+    names=list(CLASS20_LABELS_BASE) + list(CLASS20_LABELS_NOVEL[task_id]),
     train=dict(
         type="ScanNetDataset_REGISTrain",
         split="train",

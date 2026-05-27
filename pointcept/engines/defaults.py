@@ -121,6 +121,17 @@ def default_config_parser(file_path, options):
     if options is not None:
         cfg.merge_from_dict(options)
 
+    max_train = getattr(cfg, "max_train_samples", None)
+    if max_train is not None:
+        max_train = int(max_train)
+        if max_train > 0:
+            cfg.data.train.max_samples = max_train
+    max_eval = getattr(cfg, "max_eval_samples", None)
+    if max_eval is not None:
+        max_eval = int(max_eval)
+        if max_eval > 0:
+            cfg.data.test.max_samples = max_eval
+
     if cfg.seed is None:
         cfg.seed = get_random_seed()
 

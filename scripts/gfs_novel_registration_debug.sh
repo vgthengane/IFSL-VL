@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=ifs-mbuffer
+#SBATCH --job-name=gfs-mbuffer
 #SBATCH --partition=3090_risk
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -18,6 +18,12 @@ set -e
 
 RUN_ID=${SLURM_JOB_ID:-"DEBUG"}
 NUM_GPUS=${SLURM_GPUS_ON_NODE:-$(nvidia-smi -L | wc -l)}
+# Local runs default RUN_ID=DEBUG → enable fast debug limits unless overridden
+if [[ "$RUN_ID" == "DEBUG" ]]; then
+  DEBUG=${DEBUG:-1}
+else
+  DEBUG=${DEBUG:-0}
+fi
 
 # -------------------------------
 # Paths
@@ -28,12 +34,18 @@ NUM_GPUS=${SLURM_GPUS_ON_NODE:-$(nvidia-smi -L | wc -l)}
 # -------------------------------
 # Experiment Config
 # -------------------------------
+# DEBUG=1 (auto when RUN_ID=DEBUG): 10 train, 5 eval, 1 regis, 2 epochs
+
 EXP_DIR="_experiments/scannet"
-EXP_NAME="${RUN_ID}_ifs_novel_regs_wit_mbuffer"
+if [[ "$DEBUG" == "1" ]]; then
+  EXP_NAME="${RUN_ID}_gfs_debug"
+else
+  EXP_NAME="${RUN_ID}_gfs_novel_registration_wit_mbuffer_v2"
+fi
 EXP_PATH=${EXP_DIR}/${EXP_NAME}
 
 EXTRA_OPTS=()
-if [[ "$RUN_ID" == "DEBUG" ]]; then
+if [[ "$DEBUG" == "1" ]]; then
   EXTRA_OPTS+=(
     save_path=${EXP_PATH}
     max_train_samples=10
@@ -41,7 +53,6 @@ if [[ "$RUN_ID" == "DEBUG" ]]; then
     data.train.memory_ratio=0.005
     epoch=2
     eval_epoch=2
-    regis_train_list=["regis1"]
   )
 else
   EXTRA_OPTS+=(save_path=${EXP_PATH})
@@ -56,6 +67,6 @@ aprun \
   --env OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8} \
   --env PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   python tools/train.py \
-    --config-file configs/scannet/semseg-pt-v3m1-0-ifsregistrain_k5.py \
+    --config-file configs/scannet/semseg-pt-v3m1-0-gfsregistrain_k5.py \
     --num-gpus $NUM_GPUS \
     --options "${EXTRA_OPTS[@]}"

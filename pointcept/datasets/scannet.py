@@ -26,6 +26,8 @@ from .preprocessing.scannet.meta_data.scannet200_constants import (
     CLASS_LABELS_SC20_BN_COMPLEMENT_NOVEL,
     CLASS20_LABELS_BASE,
     CLASS20_LABELS_NOVEL,
+    CLASS20_LABELS_NOVEL_FLAT,
+    CLASS20_LABELS_BASE_NOVEL,
 )
 import random
 from collections import defaultdict
@@ -807,11 +809,17 @@ class ScanNetDataset_REGISTrain(ScanNetDataset_BASETrain):
     def __init__(self, nb_mix_blks=3, k_shot=5, seed=10, **kwargs):
         memory_ratio = kwargs.pop("memory_ratio")
         self.task_id = kwargs.pop("task_id")
+        incremental = kwargs.pop("incremental", True)
         super().__init__(**kwargs)
         self.nb_mix_blks = nb_mix_blks
-        reg_file = os.path.join(
-            self.data_root, f"sc_regis_t{self.task_id}_k{k_shot}_s{seed}.txt"
-        )
+        if incremental:
+            reg_file = os.path.join(
+                self.data_root, f"sc_regis_t{self.task_id}_k{k_shot}_s{seed}.txt"
+            )
+        else:
+            reg_file = os.path.join(
+                self.data_root, f"sc_regis_gfs_k{k_shot}_s{seed}.txt"
+            )
         self.regis_cls2scans = defaultdict(list)
         with open(reg_file, "r") as f:
             for line in f.read().splitlines():
@@ -820,7 +828,14 @@ class ScanNetDataset_REGISTrain(ScanNetDataset_BASETrain):
                 self.regis_cls2scans[cls_id].append(abs_scan)
 
         self.base_class_names = list(CLASS20_LABELS_BASE)
-        self.novel_class_names = [c for task_cls in CLASS20_LABELS_NOVEL[:self.task_id+1] for c in task_cls]
+        if incremental:
+            self.novel_class_names = [
+                c
+                for task_cls in CLASS20_LABELS_NOVEL[: self.task_id + 1]
+                for c in task_cls
+            ]
+        else:
+            self.novel_class_names = CLASS20_LABELS_NOVEL_FLAT.copy()
         # Build lookup mapping for unified (base + novel) label space.
         cls_to_index = {
             name: idx
@@ -839,7 +854,6 @@ class ScanNetDataset_REGISTrain(ScanNetDataset_BASETrain):
         self.novel_classes = list(self.regis_cls2scans.keys())
 
         # 🔥 Memory buffer sampling (IFSL-style)
-        memory_ratio = kwargs.get("memory_ratio", 0.05)
         seed = kwargs.get("seed", 0)
 
         if memory_ratio is not None and memory_ratio > 0:
@@ -1032,11 +1046,19 @@ class ScanNetDataset_TEST(ScanNetDataset_GFS):
     """
 
     def __init__(self, **kwargs):
-        self.task_id = kwargs.pop("task_id")
+        self.task_id = kwargs.pop("task_id", 0)
+        incremental = kwargs.pop("incremental", True)
         super().__init__(**kwargs)
         # Define base and novel class names.
         self.base_class_names = list(CLASS20_LABELS_BASE)
-        self.novel_class_names = [c for task_cls in CLASS20_LABELS_NOVEL[:self.task_id+1] for c in task_cls]
+        if incremental:
+            self.novel_class_names = [
+                c
+                for task_cls in CLASS20_LABELS_NOVEL[: self.task_id + 1]
+                for c in task_cls
+            ]
+        else:
+            self.novel_class_names = CLASS20_LABELS_NOVEL_FLAT.copy()
         # Create mapping for unified labels.
         cls_to_idx = {
             name: idx
@@ -1065,16 +1087,26 @@ class ScanNetDataset_REGIS(ScanNetDataset_GFS):
 
     def __init__(self, seed=None, k_shot=None, **kwargs):
         self.task_id = kwargs.pop("task_id")
+        incremental = kwargs.pop("incremental", True)
         super().__init__(**kwargs)
         # Ensure base and novel labels are subsets of CLASS_LABELS_20.
-        _prev_novel_class_names = [c for task_cls in CLASS20_LABELS_NOVEL[:self.task_id] for c in task_cls]
-        _novel_class_names = list(CLASS20_LABELS_NOVEL[self.task_id])
+        if incremental:
+            _prev_novel_class_names = [
+                c for task_cls in CLASS20_LABELS_NOVEL[: self.task_id] for c in task_cls
+            ]
+            _novel_class_names = list(CLASS20_LABELS_NOVEL[self.task_id])
+        else:
+            _prev_novel_class_names = []
+            _novel_class_names = CLASS20_LABELS_NOVEL_FLAT.copy()
         assert set(CLASS20_LABELS_BASE).issubset(CLASS_LABELS_20)
-        assert set(_prev_novel_class_names + _novel_class_names).issubset(CLASS_LABELS_20)
+        assert set(_prev_novel_class_names + _novel_class_names).issubset(
+            CLASS_LABELS_20
+        )
 
         self.base_class_names = list(CLASS20_LABELS_BASE)
         self.prev_novel_class_names = _prev_novel_class_names
         self.novel_class_names = _novel_class_names
+        self.incremental = incremental
         # Create mappings between original class IDs and names.
         self.orgid2name = {
             i: name.strip() for i, name in enumerate(CLASS_LABELS_20)
@@ -1113,9 +1145,15 @@ class ScanNetDataset_REGIS(ScanNetDataset_GFS):
         If the registration file does not exist, generate it using a class-to-scans mapping.
         The registration file stores paths relative to self.data_root.
         """
-        reg_file = os.path.join(
-            self.data_root, f"sc_regis_t{self.task_id}_k{self.k_shot}_s{seed}.txt"
-        )
+        if self.incremental:
+            reg_file = os.path.join(
+                self.data_root,
+                f"sc_regis_t{self.task_id}_k{self.k_shot}_s{seed}.txt",
+            )
+        else:
+            reg_file = os.path.join(
+                self.data_root, f"sc_regis_gfs_k{self.k_shot}_s{seed}.txt"
+            )
         if not os.path.exists(reg_file) and comm.is_main_process():
             class2scans_file = os.path.join(
                 self.data_root, "sc_class2trainscans.pkl"

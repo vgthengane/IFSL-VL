@@ -84,6 +84,8 @@ class TesterBase:
         if test_loader is None:
             self.logger.info("=> Building test dataset & dataloader ...")
             self.cfg.data.test.task_id = self.cfg.task_id
+            if hasattr(self.cfg, "incremental"):
+                self.cfg.data.test.incremental = self.cfg.incremental
             self.test_loader = self.build_test_loader()
         else:
             self.test_loader = test_loader
@@ -124,7 +126,14 @@ class TesterBase:
         return model
 
     def build_test_loader(self):
+        max_eval = getattr(self.cfg, "max_eval_samples", None)
+        if max_eval is not None and max_eval > 0:
+            self.cfg.data.test.max_samples = max_eval
         test_dataset = build_dataset(self.cfg.data.test)
+        self.logger.info(
+            f"Test set size: {len(test_dataset)} scenes "
+            f"(max_eval_samples={getattr(self.cfg.data.test, 'max_samples', None)})"
+        )
         if comm.get_world_size() > 1:
             test_sampler = torch.utils.data.distributed.DistributedSampler(
                 test_dataset
@@ -445,10 +454,7 @@ class GFSSemSegTester(TesterBase):
             mean_mIoUs += np.array([mIoU, base_iou, novel_iou, hm_iou])
             mean_iou_list.append(iou_list)
 
-        class_names = (
-            self.test_loader.dataset.base_class_names
-            + self.test_loader.dataset.novel_class_names
-        )
+        class_names = list(self.cfg.data.names)
 
         if comm.is_main_process():
             mean_mIoUs /= len(mean_iou_list)
@@ -458,7 +464,7 @@ class GFSSemSegTester(TesterBase):
             )
             # Calculate class-wise mean IoU and log results
             stack_iou = np.mean(np.stack(mean_iou_list, axis=0), axis=0)
-            for i, iou in enumerate(stack_iou):
+            for i, iou in enumerate(stack_iou[: len(class_names)]):
                 self.logger.info(
                     f"Class_{i} - {class_names[i]} Final Result: iou {iou:.4f}"
                 )
@@ -633,10 +639,7 @@ class GFSSemSegTester(TesterBase):
 
             base_iou_list = iou_class[: self.cfg.data.num_bases]
             novel_iou_list = iou_class[self.cfg.data.num_bases :]
-            class_names = (
-                self.test_loader.dataset.base_class_names
-                + self.test_loader.dataset.novel_class_names
-            )
+            class_names = list(self.cfg.data.names)
 
             base_iou = np.mean(base_iou_list)
             novel_iou = np.mean(novel_iou_list)

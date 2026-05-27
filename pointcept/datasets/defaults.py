@@ -42,6 +42,7 @@ class DefaultDataset(Dataset):
         cache=False,
         ignore_index=-1,
         loop=1,
+        max_samples=None,
     ):
         super(DefaultDataset, self).__init__()
         self.data_root = data_root
@@ -68,6 +69,10 @@ class DefaultDataset(Dataset):
             ]
 
         self.data_list = self.get_data_list()
+        if max_samples is not None:
+            max_samples = int(max_samples)
+            if max_samples > 0:
+                self.data_list = self.data_list[:max_samples]
         logger = get_root_logger()
         logger.info(
             "Totally {} x {} samples in {} set.".format(
